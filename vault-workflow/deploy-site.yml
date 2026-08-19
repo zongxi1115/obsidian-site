@@ -5,6 +5,9 @@ name: 触发站点重新构建
 on:
   push:
     branches: [main]
+    paths-ignore: # 改 Obsidian 配置、改这个 workflow 本身，不用重建站点
+      - '.obsidian/**'
+      - '.github/**'
   workflow_dispatch: # 也可以在 Actions 页面手动点一次
 
 jobs:
@@ -16,8 +19,8 @@ jobs:
           DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            echo "缺少 secret VERCEL_DEPLOY_HOOK，去仓库 Settings → Secrets and variables → Actions 里加一个"
-            exit 1
+            echo "::notice::还没配 VERCEL_DEPLOY_HOOK，本次跳过。到 Vercel → Settings → Git → Deploy Hooks 建一个，再把 URL 存成本仓库的 Actions secret 即可。"
+            exit 0
           fi
-          curl -fsS -X POST "$DEPLOY_HOOK"
-          echo "已通知 Vercel 重新构建"
+          curl -fsS -X POST "$DEPLOY_HOOK" > /dev/null
+          echo "::notice::已通知 Vercel 重新构建"
