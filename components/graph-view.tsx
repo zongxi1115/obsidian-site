@@ -224,11 +224,12 @@ export function GraphView({
       return;
     }
     if (panning.current) {
-      setTransform((t) => ({
-        ...t,
-        x: panning.current!.tx + (e.clientX - panning.current!.x),
-        y: panning.current!.ty + (e.clientY - panning.current!.y),
-      }));
+      // 先把值取出来：setTransform 的 updater 是延后跑的，
+      // 那时候 panning.current 可能已经被 pointerup 清成 null 了
+      const { x: startX, y: startY, tx, ty } = panning.current;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      setTransform((t) => ({ ...t, x: tx + dx, y: ty + dy }));
     }
   };
 
@@ -367,7 +368,11 @@ export function GraphView({
                   className={n.url ? 'cursor-pointer' : 'cursor-grab'}
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+                    try {
+                      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+                    } catch {
+                      // 指针已经不在了（触控、合成事件等），捕获失败不影响拖拽
+                    }
                     dragging.current = n;
                     moved.current = false;
                   }}
