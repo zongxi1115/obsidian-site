@@ -1,5 +1,5 @@
 # 这个文件要放到「笔记仓库」里：obsidian-computer/.github/workflows/deploy-site.yml
-# 作用：笔记每次 push 到 main，就去戳一下 Vercel 的 Deploy Hook，让站点重新构建。
+# 作用：提交信息里带 (publish) 的 push，去戳一下 Vercel 的 Deploy Hook，让站点重新构建。
 name: 触发站点重新构建
 
 on:
@@ -8,10 +8,16 @@ on:
     paths-ignore: # 改 Obsidian 配置、改这个 workflow 本身，不用重建站点
       - '.obsidian/**'
       - '.github/**'
-  workflow_dispatch: # 也可以在 Actions 页面手动点一次
+  workflow_dispatch: # 手动跑一次，不看提交信息
 
 jobs:
   trigger:
+    # 只有提交信息里出现 (publish) 才部署；一次 push 里任意一条 commit 带上就算。
+    # GitHub 的 contains 是大小写不敏感的，(Publish)、(PUBLISH) 一样生效。
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '(publish)') ||
+      contains(join(github.event.commits.*.message, ' || '), '(publish)')
     runs-on: ubuntu-latest
     steps:
       - name: 调用 Vercel Deploy Hook

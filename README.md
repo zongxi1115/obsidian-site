@@ -80,8 +80,21 @@ hydration 之后就把页面换成了 404。dev 和 production 都一样，应�
    名字 `VERCEL_DEPLOY_HOOK`，值就是上面那条 URL。
 3. 把 `vault-workflow/deploy-site.yml` 放进笔记仓库的 `.github/workflows/deploy-site.yml` 并提交。
 
-之后在 Obsidian 里改完笔记（用 obsidian-git 插件自动 push 更省事），
-GitHub Actions 会去戳 Deploy Hook，Vercel 重新克隆笔记、重新构建，一两分钟后公网上就是新内容。
+### 什么时候才会重建
+
+不是每次 push 都重建，**提交信息里带 `(publish)` 才会**：
+
+```bash
+git commit -m "整理计算机网络的笔记"            # 只是存个档，站点不动
+git commit -m "整理计算机网络的笔记 (publish)"   # 这条会触发 Vercel 重建
+```
+
+一次 push 里任意一条 commit 带上就算数；`contains` 是大小写不敏感的，`(Publish)` 也行。
+另外改 `.obsidian/` 配置和 `.github/` 本身不会触发，想不管提交信息直接发布就去
+Actions 页面手动跑一次（或者 `gh workflow run deploy-site.yml --repo <你的笔记仓库>`）。
+
+用 obsidian-git 插件自动 push 的话，记得把它的 commit message 模板改成带 `(publish)`，
+或者平时让它随便提交、要发布时手动补一条带 `(publish)` 的空提交。
 
 ## 需要注意的
 
