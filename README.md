@@ -25,7 +25,7 @@ pnpm dev
 
 | 笔记里的写法 | 站点上的结果 |
 | --- | --- |
-| 没有 frontmatter | 自动补 `title`（取正文一级标题，没有就用文件名）和 `description`（取第一段） |
+| 没有 frontmatter | 自动补 `title`（**开头**就是一级标题就用它，否则用文件名）和 `description`（取第一段） |
 | `![[images/xx.png]]` | `![](/vault/images/xx.png)`，图片复制到 `public/vault/` |
 | `[[某篇笔记]]`、`[[笔记#小节\|别名]]` | 指向对应页面的链接；只写文件名也能解析，解析不到就退化成纯文本 |
 | `$x^2$`、`$$...$$` | KaTeX 公式（`source.config.ts` 里挂的 remark-math + rehype-katex） |
@@ -82,19 +82,19 @@ hydration 之后就把页面换成了 404。dev 和 production 都一样，应�
 
 ### 什么时候才会重建
 
-不是每次 push 都重建，**提交信息里带 `(publish)` 才会**：
+不是每次 push 都重建，**提交信息里带 `publish` 才会**：
 
 ```bash
 git commit -m "整理计算机网络的笔记"            # 只是存个档，站点不动
 git commit -m "整理计算机网络的笔记 (publish)"   # 这条会触发 Vercel 重建
 ```
 
-一次 push 里任意一条 commit 带上就算数；`contains` 是大小写不敏感的，`(Publish)` 也行。
+一次 push 里任意一条 commit 带上就算数。只认 `publish` 这个词、不管括号形状，`(publish)`、`（publish）`、`[publish]` 都行 —— 中文输入法很容易打成全角括号，只认半角的话会静默跳过。`contains` 大小写不敏感。
 另外改 `.obsidian/` 配置和 `.github/` 本身不会触发，想不管提交信息直接发布就去
 Actions 页面手动跑一次（或者 `gh workflow run deploy-site.yml --repo <你的笔记仓库>`）。
 
-用 obsidian-git 插件自动 push 的话，记得把它的 commit message 模板改成带 `(publish)`，
-或者平时让它随便提交、要发布时手动补一条带 `(publish)` 的空提交。
+用 obsidian-git 插件自动 push 的话，记得把它的 commit message 模板改成带 `publish`，
+或者平时让它随便提交、要发布时手动补一条带 `publish` 的空提交。
 
 ## AI 问答
 

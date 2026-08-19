@@ -274,13 +274,14 @@ for (const notePath of notes) {
   const raw = fs.readFileSync(path.join(vault, notePath), 'utf8');
   const { data, body: rawBody } = stripFrontmatter(raw);
 
-  // 正文里的一级标题拿来当页面标题，避免页面上出现两个标题
+  // 开头就是一级标题的话，拿它当页面标题并从正文里去掉，避免页面上出现两个标题。
+  // 只认开头这一个：正文中间的 `# 二、xxx` 是章节标题，不能当成整篇的标题，也不能删。
   let body = rawBody;
   let title = data.title;
-  const h1 = /^#\s+(.+?)\s*$/m.exec(body);
-  if (!title && h1) {
-    title = h1[1];
-    body = body.replace(h1[0], '');
+  const leadingH1 = /^\s*#\s+(.+?)[^\S\r\n]*(?:\r?\n|$)/.exec(body);
+  if (!title && leadingH1) {
+    title = leadingH1[1];
+    body = body.slice(leadingH1[0].length);
   }
   title ??= path.basename(notePath, '.md');
 
