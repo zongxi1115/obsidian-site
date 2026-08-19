@@ -93,8 +93,14 @@ git commit -m "整理计算机网络的笔记 (publish)"   # 这条会触发 Ver
 另外改 `.obsidian/` 配置和 `.github/` 本身不会触发，想不管提交信息直接发布就去
 Actions 页面手动跑一次（或者 `gh workflow run deploy-site.yml --repo <你的笔记仓库>`）。
 
-用 obsidian-git 插件自动 push 的话，记得把它的 commit message 模板改成带 `publish`，
-或者平时让它随便提交、要发布时手动补一条带 `publish` 的空提交。
+用 obsidian-git 插件自动 push 的话，记得把它的 commit message 模板改成带 `publish`。
+
+> **空提交不管用。** `paths-ignore` 是按改动的文件判断的，`--allow-empty` 的提交一个文件都没动，
+> 工作流根本不会启动（不是 skipped，是压根没有这次运行）。想不改笔记直接重建，用手动触发：
+>
+> ```bash
+> gh workflow run deploy-site.yml --repo zongxi1115/obsidian-computer
+> ```
 
 ## AI 问答
 
