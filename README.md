@@ -25,7 +25,7 @@ pnpm dev
 
 | 笔记里的写法 | 站点上的结果 |
 | --- | --- |
-| 没有 frontmatter | 自动补 `title`（**开头**就是一级标题就用它，否则用文件名）和 `description`（取第一段） |
+| 没有 frontmatter | 自动补 `title`（就用文件名）和 `description`（取第一段），正文原样保留 |
 | `![[images/xx.png]]` | `![](/vault/images/xx.png)`，图片复制到 `public/vault/` |
 | `[[某篇笔记]]`、`[[笔记#小节\|别名]]` | 指向对应页面的链接；只写文件名也能解析，解析不到就退化成纯文本 |
 | `$x^2$`、`$$...$$` | KaTeX 公式（`source.config.ts` 里挂的 remark-math + rehype-katex） |

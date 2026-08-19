@@ -274,16 +274,10 @@ for (const notePath of notes) {
   const raw = fs.readFileSync(path.join(vault, notePath), 'utf8');
   const { data, body: rawBody } = stripFrontmatter(raw);
 
-  // 开头就是一级标题的话，拿它当页面标题并从正文里去掉，避免页面上出现两个标题。
-  // 只认开头这一个：正文中间的 `# 二、xxx` 是章节标题，不能当成整篇的标题，也不能删。
+  // 标题就用文件名 —— Obsidian 里文件名本来就是标题。
+  // 正文一律原样保留，不去猜哪个 # 是"整篇的标题"。
   let body = rawBody;
-  let title = data.title;
-  const leadingH1 = /^\s*#\s+(.+?)[^\S\r\n]*(?:\r?\n|$)/.exec(body);
-  if (!title && leadingH1) {
-    title = leadingH1[1];
-    body = body.slice(leadingH1[0].length);
-  }
-  title ??= path.basename(notePath, '.md');
+  const title = data.title ?? path.basename(notePath, '.md');
 
   const description = data.description ?? makeDescription(body);
   const outgoing = new Set();
