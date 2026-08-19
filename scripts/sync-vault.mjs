@@ -31,8 +31,14 @@ const OUT_GRAPH = path.join(ROOT, 'content/graph.json');
 const OUT_ASSETS = path.join(ROOT, 'public/vault');
 const CACHE = path.join(ROOT, '.vault-cache');
 
-const VAULT_REPO = process.env.VAULT_REPO ?? 'https://github.com/zongxi1115/obsidian-computer';
-const VAULT_BRANCH = process.env.VAULT_BRANCH ?? 'main';
+// Vercel 上没填值的环境变量会以空字符串注入，所以空白一律当没设过处理
+const env = (name, fallback = '') => {
+  const value = process.env[name]?.trim();
+  return value ? value : fallback;
+};
+
+const VAULT_REPO = env('VAULT_REPO', 'https://github.com/zongxi1115/obsidian-computer');
+const VAULT_BRANCH = env('VAULT_BRANCH', 'main');
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.avif']);
 const SKIP_DIRS = new Set(['.git', '.obsidian', '.trash', '.claudian', 'node_modules', 'Excalidraw']);
@@ -40,26 +46,37 @@ const SKIP_DIRS = new Set(['.git', '.obsidian', '.trash', '.claudian', 'node_mod
 /* ---------------------------------------------------------------- 取内容源 */
 
 function resolveVault() {
-  const local = process.env.VAULT_DIR;
+  const local = env('VAULT_DIR');
   if (local && fs.existsSync(local)) {
     console.log(`[sync] 使用本地仓库 ${local}`);
     return local;
   }
+  if (local) {
+    console.warn(`[sync] VAULT_DIR=${local} 不存在，改成克隆远端仓库`);
+  }
 
-  if (fs.existsSync(path.join(CACHE, '.git'))) {
-    console.log(`[sync] 更新缓存的仓库 ${VAULT_REPO}`);
-    execFileSync('git', ['-C', CACHE, 'fetch', '--depth', '1', 'origin', VAULT_BRANCH], {
-      stdio: 'inherit',
-    });
-    execFileSync('git', ['-C', CACHE, 'reset', '--hard', `origin/${VAULT_BRANCH}`], {
-      stdio: 'inherit',
-    });
-  } else {
-    console.log(`[sync] 克隆 ${VAULT_REPO} (${VAULT_BRANCH})`);
-    fs.rmSync(CACHE, { recursive: true, force: true });
-    execFileSync('git', ['clone', '--depth', '1', '--branch', VAULT_BRANCH, VAULT_REPO, CACHE], {
-      stdio: 'inherit',
-    });
+  console.log(`[sync] 内容来源：${VAULT_REPO} (${VAULT_BRANCH})`);
+
+  try {
+    if (fs.existsSync(path.join(CACHE, '.git'))) {
+      execFileSync('git', ['-C', CACHE, 'fetch', '--depth', '1', 'origin', VAULT_BRANCH], {
+        stdio: 'inherit',
+      });
+      execFileSync('git', ['-C', CACHE, 'reset', '--hard', `origin/${VAULT_BRANCH}`], {
+        stdio: 'inherit',
+      });
+    } else {
+      fs.rmSync(CACHE, { recursive: true, force: true });
+      execFileSync('git', ['clone', '--depth', '1', '--branch', VAULT_BRANCH, VAULT_REPO, CACHE], {
+        stdio: 'inherit',
+      });
+    }
+  } catch {
+    throw new Error(
+      `拉取笔记仓库失败：${VAULT_REPO} (${VAULT_BRANCH})。\n` +
+        '检查一下 VAULT_REPO / VAULT_BRANCH 有没有填错，' +
+        '仓库如果是私有的要用 https://x-access-token:<token>@github.com/... 的形式。',
+    );
   }
   return CACHE;
 }
