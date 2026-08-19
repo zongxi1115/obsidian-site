@@ -1,0 +1,23 @@
+# 这个文件要放到「笔记仓库」里：obsidian-computer/.github/workflows/deploy-site.yml
+# 作用：笔记每次 push 到 main，就去戳一下 Vercel 的 Deploy Hook，让站点重新构建。
+name: 触发站点重新构建
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 也可以在 Actions 页面手动点一次
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 调用 Vercel Deploy Hook
+        env:
+          DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "缺少 secret VERCEL_DEPLOY_HOOK，去仓库 Settings → Secrets and variables → Actions 里加一个"
+            exit 1
+          fi
+          curl -fsS -X POST "$DEPLOY_HOOK"
+          echo "已通知 Vercel 重新构建"
