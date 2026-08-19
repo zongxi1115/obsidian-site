@@ -29,6 +29,7 @@ export function Comments() {
       'data-category': giscusConfig.category,
       'data-category-id': giscusConfig.categoryId,
       'data-mapping': 'pathname',
+      // 严格匹配：不然 /docs/a 和 /docs/a-b 可能被算成同一条讨论
       'data-strict': '1',
       'data-reactions-enabled': '1',
       'data-emit-metadata': '0',
