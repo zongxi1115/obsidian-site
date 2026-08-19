@@ -15,6 +15,9 @@ import { gitConfig } from '@/lib/shared';
 import vaultMap from '@/content/vault-map.json';
 import { Backlinks } from '@/components/backlinks';
 import { GraphPanel } from '@/components/graph-panel';
+import { ProtectedNote } from '@/components/protected-note';
+import { Comments } from '@/components/comments';
+import { commentsEnabled } from '@/lib/comments';
 
 export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   const params = await props.params;
@@ -26,6 +29,10 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   // 站点里的文件名是拼音，映射回笔记仓库里的中文原路径
   const vaultPath = (vaultMap as Record<string, string>)[page.path];
   const graphId = page.path.replace(/\.mdx?$/, '');
+  // frontmatter 里写了 password：正文在产物里是密文，解锁后在浏览器里渲染
+  const encrypted = page.data.encrypted;
+  // 生成出来的索引页没有对应笔记；加密的那篇也不开评论，免得讨论区把内容漏出去
+  const showComments = commentsEnabled && Boolean(vaultPath) && !encrypted && page.data.comments !== false;
 
   return (
     <DocsPage
@@ -45,15 +52,20 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
         />
       </div>
       <DocsBody>
-        <MDX
-          components={getMDXComponents({
-            // this allows you to link to other pages with relative file paths
-            a: createRelativeLink(source, page),
-          })}
-        />
+        {encrypted ? (
+          <ProtectedNote payload={encrypted} />
+        ) : (
+          <MDX
+            components={getMDXComponents({
+              // this allows you to link to other pages with relative file paths
+              a: createRelativeLink(source, page),
+            })}
+          />
+        )}
       </DocsBody>
       {/* 首页那种生成出来的索引页没有对应笔记，就不显示反链 */}
       {vaultPath && <Backlinks id={graphId} />}
+      {showComments && <Comments />}
     </DocsPage>
   );
 }

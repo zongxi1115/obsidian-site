@@ -12,3 +12,33 @@ html > body[data-scroll-locked] {
   margin-right: 0px !important;
   --removed-body-scroll-bar-size: 0px !important;
 }
+
+/* Obsidian 的 ==高亮==，浏览器默认那个荧光黄在深色下太刺眼 */
+.prose mark {
+  background-color: color-mix(in oklch, var(--color-fd-primary) 22%, transparent);
+  color: inherit;
+  border-radius: 0.25rem;
+  padding: 0.05em 0.2em;
+}
+
+/* 折叠 callout 的三角箭头交给自己画的图标 */
+summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 口令输错时抖一下 */
+@keyframes note-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.note-shake {
+  animation: note-shake 0.32s ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-shake {
+    animation: none;
+  }
+}

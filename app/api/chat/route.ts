@@ -8,7 +8,7 @@ import {
   toUIMessageStream,
 } from 'ai';
 import { z } from 'zod';
-import { source } from '@/lib/source';
+import { isIndexable, source } from '@/lib/source';
 import { aiConfig, aiEnabled } from '@/lib/ai';
 import { Document, type DocumentData } from 'flexsearch';
 import { ChatUIMessage, SearchTool } from '../../../components/ai/search';
@@ -31,7 +31,8 @@ async function createSearchServer() {
   });
 
   const docs = await chunkedAll(
-    source.getPages().map(async (page) => {
+    // 藏起来的和加了口令的笔记不进 AI 的检索范围
+    source.getPages().filter(isIndexable).map(async (page) => {
       if (!('getText' in page.data)) return null;
 
       return {

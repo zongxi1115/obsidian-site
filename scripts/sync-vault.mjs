@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createCipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { pinyin } from 'pinyin-pro';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -139,15 +140,45 @@ function stripFrontmatter(text) {
   return { data, body: text.slice(m[0].length) };
 }
 
+/* ------------------------------------------------------- frontmatter 开关 */
+
+/** frontmatter 里 display: none / hide / false 都算「不在目录里列出来」 */
+const isHidden = (data) => ['none', 'hide', 'hidden', 'false'].includes(String(data.display ?? '').toLowerCase());
+
+/** frontmatter 里 comments: false / no / off 就关掉这一篇的评论区 */
+const commentsOff = (data) =>
+  'comments' in data && ['false', 'no', 'off', '0'].includes(String(data.comments).toLowerCase());
+
+const PBKDF2_ITERATIONS = 200_000;
+
+/**
+ * frontmatter 里写了 password 就把正文整段加密，构建产物里不留明文。
+ * 前端拿到的是这一串 base64，输对口令才在浏览器里解出来渲染。
+ *
+ * 字节布局：salt(16) | iv(12) | 密文 | GCM tag(16)
+ * —— WebCrypto 解密时要求 tag 跟在密文后面，所以这里直接拼一起。
+ */
+function encryptBody(text, password) {
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const key = pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  return Buffer.concat([salt, iv, data, cipher.getAuthTag()]).toString('base64');
+}
+
 /** 用正文第一段做简介 */
 function makeDescription(body) {
   for (const block of body.split(/\r?\n\s*\r?\n/)) {
     const line = block
       .trim()
-      .replace(/^[#>\-*\s]+/, '')
+      .replace(/%%[\s\S]*?%%/g, '') // Obsidian 的注释
+      .replace(/^\s*>\s?/gm, '') // 引用 / callout 的 > 前缀
+      .replace(/^\[![\w-]+\][+-]?\s*/gm, '') // callout 的 [!tip] 标记
+      .replace(/^[#\-*\s]+/, '')
       .replace(/!?\[\[.*?\]\]/g, '')
       .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/[`*_$]/g, '')
+      .replace(/[`*_$=]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
     if (line.length > 8) return line.length > 100 ? `${line.slice(0, 100)}…` : line;
@@ -279,14 +310,27 @@ for (const notePath of notes) {
   let body = rawBody;
   const title = data.title ?? path.basename(notePath, '.md');
 
-  const description = data.description ?? makeDescription(body);
+  const hidden = isHidden(data);
+  const password = String(data.password ?? '').trim();
+
   const outgoing = new Set();
   body = rewriteLinks(body, notePath, outgoing);
+
+  // 加密的那篇，简介也不能自动生成 —— 那等于把开头一段明文抄到侧栏和搜索结果里
+  const description = data.description ?? (password ? undefined : makeDescription(body));
+  const encrypted = password ? encryptBody(body.trimStart(), password) : undefined;
+  if (password) {
+    console.log(`[sync] ${notePath} 已加密（口令保护）`);
+    body = ''; // 产物里不留明文
+  }
 
   const frontmatter = [
     '---',
     `title: ${yamlString(title)}`,
     ...(description ? [`description: ${yamlString(description)}`] : []),
+    ...(hidden ? ['display: none'] : []),
+    ...(commentsOff(data) ? ['comments: false'] : []),
+    ...(encrypted ? [`encrypted: ${yamlString(encrypted)}`] : []),
     '---',
     '',
   ].join('\n');
@@ -296,8 +340,11 @@ for (const notePath of notes) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, frontmatter + body.trimStart());
   vaultMap[`${slugPath}.md`] = notePath;
-  written.push({ notePath, slugPath, title, outgoing: [...outgoing] });
+  written.push({ notePath, slugPath, title, hidden, outgoing: [...outgoing] });
 }
+
+/** display: none 的笔记：不进侧栏、不进首页索引、不进图谱、不进搜索。链接照样能打开 */
+const listed = written.filter((item) => !item.hidden);
 
 // 图片
 for (const asset of assets) {
@@ -308,17 +355,35 @@ for (const asset of assets) {
 
 /* ------------------------------------------- 目录名 + 首页 + 侧栏排序 */
 
+// 每层目录里被藏起来的页面，用 meta.json 的 "!名字" 语法从侧栏里剔掉
+const hiddenByDir = new Map();
+for (const item of written) {
+  if (!item.hidden) continue;
+  const slugDirOf = path.dirname(item.slugPath) === '.' ? '' : path.dirname(item.slugPath);
+  if (!hiddenByDir.has(slugDirOf)) hiddenByDir.set(slugDirOf, []);
+  hiddenByDir.get(slugDirOf).push(`!${path.basename(item.slugPath)}`);
+}
+
 // 目录名是拼音，侧栏要显示中文，靠每层的 meta.json
 for (const [dir, dirSlug] of dirSlugs) {
   if (!dir) continue;
+  const excluded = hiddenByDir.get(dirSlug);
   fs.writeFileSync(
     path.join(OUT_DOCS, dirSlug, 'meta.json'),
-    `${JSON.stringify({ title: path.basename(dir) }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        title: path.basename(dir),
+        // "..." 代表"其余的按默认顺序排"，前面的 "!x" 会先把 x 排除掉
+        ...(excluded ? { pages: [...excluded, '...'] } : {}),
+      },
+      null,
+      2,
+    )}\n`,
   );
 }
 
 const byFolder = new Map();
-for (const item of written) {
+for (const item of listed) {
   const folder = path.dirname(item.notePath) === '.' ? '' : path.dirname(item.notePath);
   if (!byFolder.has(folder)) byFolder.set(folder, []);
   byFolder.get(folder).push(item);
@@ -340,7 +405,7 @@ fs.writeFileSync(
   path.join(OUT_DOCS, 'index.mdx'),
   `---
 title: 全部笔记
-description: 由 Obsidian 仓库自动生成，共 ${written.length} 篇
+description: 由 Obsidian 仓库自动生成，共 ${listed.length} 篇
 ---
 
 ${indexBody}
@@ -350,14 +415,14 @@ ${indexBody}
 // 让首页永远排在最前面
 fs.writeFileSync(
   path.join(OUT_DOCS, 'meta.json'),
-  `${JSON.stringify({ pages: ['index', '...'] }, null, 2)}\n`,
+  `${JSON.stringify({ pages: ['index', ...(hiddenByDir.get('') ?? []), '...'] }, null, 2)}\n`,
 );
 
 fs.writeFileSync(OUT_MAP, `${JSON.stringify(vaultMap, null, 2)}\n`);
 
 /* ------------------------------------------------- 双链图谱 + 反向链接 */
 
-const nodes = written.map((item) => {
+const nodes = listed.map((item) => {
   const folder = path.dirname(item.notePath) === '.' ? '' : path.dirname(item.notePath);
   return {
     id: item.slugPath,
@@ -367,12 +432,14 @@ const nodes = written.map((item) => {
   };
 });
 
+const visibleSlugs = new Set(listed.map((item) => item.slugPath));
 const links = [];
 const seenLink = new Set();
-for (const item of written) {
+for (const item of listed) {
   for (const target of item.outgoing) {
     const targetSlug = noteSlugPath.get(target);
-    if (!targetSlug) continue;
+    // 指向隐藏页面的连线也不画，否则藏起来的标题会从图谱里漏出去
+    if (!targetSlug || !visibleSlugs.has(targetSlug)) continue;
     const key = `${item.slugPath}→${targetSlug}`;
     if (seenLink.has(key)) continue;
     seenLink.add(key);
@@ -391,6 +458,8 @@ fs.writeFileSync(
   `${JSON.stringify({ nodes, links, backlinks }, null, 2)}\n`,
 );
 
+const hiddenCount = written.length - listed.length;
 console.log(
-  `[sync] 完成：${written.length} 篇笔记，${assets.length} 张图片，${links.length} 条双链`,
+  `[sync] 完成：${written.length} 篇笔记${hiddenCount ? `（其中 ${hiddenCount} 篇不列出来）` : ''}，` +
+    `${assets.length} 张图片，${links.length} 条双链`,
 );

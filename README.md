@@ -29,8 +29,14 @@ pnpm dev
 | `![[images/xx.png]]` | `![](/vault/images/xx.png)`，图片复制到 `public/vault/` |
 | `[[某篇笔记]]`、`[[笔记#小节\|别名]]` | 指向对应页面的链接；只写文件名也能解析，解析不到就退化成纯文本 |
 | `$x^2$`、`$$...$$` | KaTeX 公式（`source.config.ts` 里挂的 remark-math + rehype-katex） |
+| `> [!tip] 标题` | Obsidian / GitHub 的 callout，颜色和图标照 Obsidian 那套；`[!tip]-` 折叠、`[!tip]+` 默认展开 |
+| ` ```mermaid ` | 渲染成图（客户端画，跟着深浅色主题走） |
+| `==高亮==`、`%%注释%%` | `<mark>` / 直接删掉 |
+| 裸 HTML：`<iframe>`、`<details>`、`<kbd>` … | 原样渲染，`<iframe>` 会自动套个 16:9 的圆角框 |
 | `*.excalidraw.md`、`Excalidraw/`、`.obsidian/` | 跳过 |
 | 中文文件名 / 目录名 | 转成拼音当 URL，中文放进 `title` 和 `meta.json`（原因见下一节） |
+
+frontmatter 里还认三个开关，见 [frontmatter 开关](#frontmatter-开关)。
 
 ## 为什么 URL 是拼音
 
@@ -48,6 +54,73 @@ hydration 之后就把页面换成了 404。dev 和 production 都一样，应�
 
 同一层里拼音撞车（不同的字同音）会自动加 `-2`、`-3` 后缀。副作用是**改笔记文件名会导致 URL 变化**，
 老链接会失效。
+
+## frontmatter 开关
+
+笔记的 frontmatter 里可以写这几个，Obsidian 里不影响阅读，站点上会生效：
+
+```yaml
+---
+display: none        # 不列出来
+password: 我的口令    # 上锁
+comments: false      # 关掉这一篇的评论
+---
+```
+
+### `display: none`
+
+侧栏、首页索引、关系图谱、站内搜索、AI 检索里都不会出现这一篇，**但链接照样能打开**。
+就是「不公开列出来，知道地址的人能看」的意思，不是保险箱 —— 要真藏内容用 `password`。
+
+（`hide` / `hidden` / `false` 也认同一个意思。）
+
+### `password: xxx`
+
+正文在**构建的时候**就用 AES-256-GCM 加密了（口令过一遍 PBKDF2-SHA256，20 万轮），
+构建产物里只有一串密文，明文一个字都不留：
+
+- 页面 HTML、`content/` 目录、`llms.txt`、站内搜索、AI 检索，全都拿不到正文
+- 简介也不自动生成了（不然等于把开头一段抄到侧栏上去）
+- 这一篇不显示评论区
+- 打开页面是个输口令的卡片，输对了在**浏览器里**解密并渲染（公式、代码高亮、callout 都在）
+- 同一个标签页里解锁过就记住了，关掉标签页就忘
+
+标题和文件名还是明文的（侧栏要显示），想连标题都藏起来就再加一个 `display: none`。
+
+> 口令写在笔记的 frontmatter 里，所以**笔记仓库本身能看到口令**。笔记仓库现在是公开的，
+> 也就是说这个加密防的是「站点的读者」，不是「能翻你笔记仓库的人」。
+> 真要防后者，得把笔记仓库改成私有。
+
+### `comments: false`
+
+只关这一篇的评论区。
+
+## 评论区
+
+用 [giscus](https://giscus.app)：评论存在 GitHub Discussions 里，不用自己开数据库，
+读者拿 GitHub 账号登录就能评，主题跟着站点深浅色走。
+
+开起来要三步：
+
+1. 找一个**公开**仓库当评论的容器（笔记仓库 `obsidian-computer` 就行），
+   Settings → General → Features 勾上 **Discussions**。
+2. 给这个仓库装上 [giscus app](https://github.com/apps/giscus)。
+3. 打开 https://giscus.app ，填仓库名、Discussion 分类选 `Announcements`、
+   映射方式选 **pathname**，它会生成一段 `<script>`，把里面这四个值抄出来：
+
+```
+NEXT_PUBLIC_GISCUS_REPO=zongxi1115/obsidian-computer
+NEXT_PUBLIC_GISCUS_REPO_ID=R_kgD...
+NEXT_PUBLIC_GISCUS_CATEGORY=Announcements
+NEXT_PUBLIC_GISCUS_CATEGORY_ID=DIC_kwD...
+```
+
+填到 Vercel 的环境变量里（本地开发就写进 `.env.local`），重新构建就有了。
+**四个值不填全就整个不显示评论区**，跟 AI 那个按钮一样的逻辑。
+
+必须是 `NEXT_PUBLIC_` 前缀 —— 这几个值要在浏览器里用，本来就是公开的，不算密钥。
+
+生成出来的首页索引、加了口令的笔记、写了 `comments: false` 的笔记，都不显示评论。
 
 ## 双链和关系图谱
 
@@ -124,4 +197,6 @@ Actions 页面手动跑一次（或者 `gh workflow run deploy-site.yml --repo <
 - 笔记仓库现在是公开的，同步脚本才能免密克隆。如果改成私有，需要在 Vercel 加一个有读权限的
   token，并把 `VAULT_REPO` 换成 `https://x-access-token:$TOKEN@github.com/...` 的形式。
 - 站点会把笔记全文公开，写之前想一想别把私密内容放进这个仓库。
+- 笔记里的裸 HTML 是**直接渲染**的，没做过滤 —— 笔记只有你自己写，所以没拦；
+  真要粘别人的 HTML 片段之前先看一眼里面有没有 `<script>`。
 - Excalidraw 画板目前是跳过的，需要展示的话得额外做导出。
