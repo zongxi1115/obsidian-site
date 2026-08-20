@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowUpRight, Waypoints } from 'lucide-react';
+import { Globe, Maximize2 } from 'lucide-react';
 import {
   forceCenter,
   forceCollide,
@@ -67,7 +67,8 @@ export function GraphView({
   heightClass?: string;
   className?: string;
   /** 传了就在右上角显示放大按钮 */
-  onExpand?: () => void;
+  /** 小窗右上角两个放大按钮：local = 只放大眼前这块，full = 放大整张图 */
+  onExpand?: (scope: 'local' | 'full') => void;
 }) {
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -373,31 +374,27 @@ export function GraphView({
           panning.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y };
         }}
       >
-        {compact && (
+        {compact && onExpand && (
           <div className="text-fd-muted-foreground absolute end-2 top-2 z-10 flex items-center gap-1">
+            {/* 「按目录连线」的开关挪进放大后的弹窗里了，小窗上只留两个放大 */}
             <button
               type="button"
-              title={showFolders ? '关掉目录连线' : '按目录连线'}
-              aria-pressed={showFolders}
+              title="放大这一块（同目录 + 直连）"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => setShowFolders((v) => !v)}
-              className={`hover:bg-fd-accent hover:text-fd-foreground rounded p-1 ${
-                showFolders ? 'text-fd-foreground' : ''
-              }`}
+              onClick={() => onExpand('local')}
+              className="hover:bg-fd-accent hover:text-fd-foreground rounded p-1"
             >
-              <Waypoints className="size-3.5" />
+              <Maximize2 className="size-3.5" />
             </button>
-            {onExpand && (
-              <button
-                type="button"
-                title="放大"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={onExpand}
-                className="hover:bg-fd-accent hover:text-fd-foreground rounded p-1"
-              >
-                <ArrowUpRight className="size-3.5" />
-              </button>
-            )}
+            <button
+              type="button"
+              title="放大整张图（全部笔记）"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => onExpand('full')}
+              className="hover:bg-fd-accent hover:text-fd-foreground rounded p-1"
+            >
+              <Globe className="size-3.5" />
+            </button>
           </div>
         )}
 
@@ -416,9 +413,12 @@ export function GraphView({
                   y1={s.y}
                   x2={t.x}
                   y2={t.y}
-                  style={{ stroke: highlight ? TEXT_STRONG : NODE }}
-                  strokeWidth={highlight ? 1.6 : 1}
-                  opacity={fade ? 0.1 : highlight ? 0.9 : 0.35}
+                  style={{
+                    stroke: highlight ? TEXT_STRONG : NODE,
+                    strokeWidth: highlight ? 1.6 : 1,
+                    opacity: fade ? 0.1 : highlight ? 0.9 : 0.35,
+                    transition: 'opacity 160ms ease-out, stroke-width 160ms ease-out',
+                  }}
                 />
               );
             })}
@@ -432,7 +432,7 @@ export function GraphView({
                 <g
                   key={n.id}
                   transform={`translate(${n.x ?? 0},${n.y ?? 0})`}
-                  opacity={fade ? 0.25 : 1}
+                  style={{ opacity: fade ? 0.25 : 1, transition: 'opacity 160ms ease-out' }}
                   className={n.url ? 'cursor-pointer' : 'cursor-grab'}
                   onPointerDown={(e) => {
                     e.stopPropagation();
@@ -457,23 +457,29 @@ export function GraphView({
                       （除以缩放系数，保证屏幕上看到的那圈始终一样大） */}
                   <circle r={r + hitPadding / transform.k} fill="transparent" />
                   <circle
-                    r={r}
                     style={{
+                      // r 在 SVG2 里是 CSS 属性，能直接过渡；浮上去稍微鼓一点
+                      r: isHovered ? r * 1.25 : r,
                       fill: n.isFolder ? 'transparent' : isActive ? ACCENT : NODE,
                       stroke: isActive ? ACCENT : NODE,
+                      opacity: n.isFolder ? 0.7 : isHovered ? 1 : 0.85,
+                      transition: 'r 160ms ease-out, opacity 160ms ease-out',
                     }}
+                    // r 属性兜底：万一浏览器不认 CSS 的 r，至少尺寸是对的
+                    r={r}
                     strokeWidth={n.isFolder ? 1.5 : 0}
-                    opacity={n.isFolder ? 0.7 : isHovered ? 1 : 0.85}
                   />
                   {labelsVisible && (
                     <text
                       y={r + (compact ? 11 : 14)}
                       textAnchor="middle"
-                      fontSize={compact ? 9 : 11}
                       style={{
+                        // 字号本身就能过渡，居中对齐所以是从中间长开的
+                        fontSize: (compact ? 9 : 11) * (isHovered ? 1.35 : 1),
                         fill: isActive ? ACCENT : isHovered ? TEXT_STRONG : TEXT,
-                        pointerEvents: 'none',
                         fontWeight: isActive || isHovered ? 600 : 400,
+                        pointerEvents: 'none',
+                        transition: 'font-size 160ms ease-out, fill 160ms ease-out',
                       }}
                     >
                       {n.title}

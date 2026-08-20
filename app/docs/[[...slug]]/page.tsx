@@ -14,7 +14,7 @@ import { createRelativeLink } from 'fumadocs-ui/mdx';
 import { appName, author, gitConfig } from '@/lib/shared';
 import vaultMap from '@/content/vault-map.json';
 import { Backlinks } from '@/components/backlinks';
-import { GraphPanel, GraphPanelCompact } from '@/components/graph-panel';
+import { GraphPanel } from '@/components/graph-panel';
 import { ProtectedNote } from '@/components/protected-note';
 import { Comments } from '@/components/comments';
 import { commentsEnabled } from '@/lib/comments';
@@ -38,10 +38,10 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
     <DocsPage
       toc={page.data.toc}
       full={page.data.full}
-      // 图谱小窗放在右侧栏 "On this page" 上面
+      // 图谱小窗放在右侧栏 "On this page" 上面，移动端的目录弹层里也放一份
+      // （弹层默认只有 50vh，图谱会把目录挤没，高度在 global.css 里放宽了）
       tableOfContent={{ header: <GraphPanel activeId={graphId} /> }}
-      // 移动端的目录弹层矮，图谱只留一个按钮，把高度让给目录
-      tableOfContentPopover={{ header: <GraphPanelCompact activeId={graphId} /> }}
+      tableOfContentPopover={{ header: <GraphPanel activeId={graphId} /> }}
     >
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>

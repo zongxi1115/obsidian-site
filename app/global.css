@@ -42,3 +42,11 @@ summary::-webkit-details-marker {
     animation: none;
   }
 }
+
+/*
+ * 移动端顶部的目录弹层默认只有 50vh，里面还塞着关系图谱，
+ * 目录就只剩一条缝了。放宽一点，图谱和目录都够看。
+ */
+[data-toc-popover-content] > div {
+  max-height: min(80vh, 40rem);
+}
