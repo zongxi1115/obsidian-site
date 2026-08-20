@@ -10,6 +10,7 @@
  *   content/vault-map.json —— 页面路径 → 笔记仓库里的原始路径（给"编辑此页"用）
  *   content/graph.json     —— 双链图谱的节点/连线/反向链接
  *   content/previews.json  —— 每篇的标题/是否上锁，鼠标浮到双链上弹的那个小窗用
+ *   content/site.json      —— 从 VAULT_REPO 解析出来的仓库信息，「编辑此页」和默认站名靠它
  *   public/previews/**     —— 那个小窗里要渲染的正文（截断过），悬浮时才去取
  *   public/vault/**      —— 笔记里引用到的图片
  */
@@ -32,6 +33,7 @@ const OUT_DOCS = path.join(ROOT, 'content/docs');
 const OUT_MAP = path.join(ROOT, 'content/vault-map.json');
 const OUT_GRAPH = path.join(ROOT, 'content/graph.json');
 const OUT_PREVIEWS = path.join(ROOT, 'content/previews.json');
+const OUT_SITE = path.join(ROOT, 'content/site.json');
 const OUT_ASSETS = path.join(ROOT, 'public/vault');
 const OUT_PREVIEW_DOCS = path.join(ROOT, 'public/previews');
 const CACHE = path.join(ROOT, '.vault-cache');
@@ -42,8 +44,38 @@ const env = (name, fallback = '') => {
   return value ? value : fallback;
 };
 
-const VAULT_REPO = env('VAULT_REPO', 'https://github.com/zongxi1115/obsidian-computer');
+const DEFAULT_REPO = 'https://github.com/zongxi1115/obsidian-computer';
+const VAULT_REPO = env('VAULT_REPO', DEFAULT_REPO);
 const VAULT_BRANCH = env('VAULT_BRANCH', 'main');
+
+if (!env('VAULT_REPO')) {
+  console.warn(
+    '[sync] ⚠️ 没设 VAULT_REPO，用的是内置的示例仓库。' +
+      '要换成自己的笔记仓库，设置 VAULT_REPO（本地开发也可以用 VAULT_DIR 指本机目录）。',
+  );
+}
+
+/**
+ * 从仓库地址解析出 owner / repo —— 「在 GitHub 上编辑」的链接和默认站名都靠它。
+ * 这样整套换成别人的仓库只需要改 VAULT_REPO 一个变量。
+ *
+ * 认这几种写法：
+ *   https://github.com/owner/repo(.git)
+ *   git@github.com:owner/repo.git
+ *   https://x-access-token:TOKEN@github.com/owner/repo   （私有仓库）
+ */
+function parseRepo(url) {
+  const cleaned = url.replace(/\.git$/, '').replace(/\/$/, '');
+  const m = /^(?:[a-z+]+:\/\/)?(?:[^@/]*@)?([^/:]+)[/:]([^/]+)\/([^/]+)$/i.exec(cleaned);
+  if (!m) {
+    console.warn(`[sync] 解析不了仓库地址 ${url}，「编辑此页」的链接会不可用`);
+    return { host: 'github.com', user: '', repo: 'notes', branch: VAULT_BRANCH };
+  }
+  const [, host, user, repo] = m;
+  return { host, user, repo, branch: VAULT_BRANCH };
+}
+
+const repoInfo = parseRepo(VAULT_REPO);
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.avif']);
 const SKIP_DIRS = new Set(['.git', '.obsidian', '.trash', '.claudian', 'node_modules', 'Excalidraw']);
@@ -445,6 +477,9 @@ fs.writeFileSync(
 );
 
 fs.writeFileSync(OUT_MAP, `${JSON.stringify(vaultMap, null, 2)}\n`);
+// 仓库信息也落一份，前端不用再读环境变量
+fs.writeFileSync(OUT_SITE, `${JSON.stringify({ repo: repoInfo }, null, 2)}
+`);
 
 /* ------------------------------------------------- 双链图谱 + 反向链接 */
 

@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName, gitConfig } from './shared';
+import { appName, vaultRepoUrl } from './shared';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -11,6 +11,6 @@ export function baseOptions(): BaseLayoutProps {
       { text: '笔记', url: '/docs' },
       { text: '关系图谱', url: '/graph' },
     ],
-    githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
+    githubUrl: vaultRepoUrl,
   };
 }

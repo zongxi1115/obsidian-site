@@ -11,7 +11,7 @@ import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
-import { appName, author, gitConfig } from '@/lib/shared';
+import { appName, author, vaultFileUrl } from '@/lib/shared';
 import vaultMap from '@/content/vault-map.json';
 import { Backlinks } from '@/components/backlinks';
 import { GraphPanel } from '@/components/graph-panel';
@@ -49,7 +49,7 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover
           markdownUrl={markdownUrl}
-          githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/${vaultPath ?? ''}`}
+          githubUrl={vaultFileUrl(vaultPath ?? '')}
         />
       </div>
       <DocsBody>

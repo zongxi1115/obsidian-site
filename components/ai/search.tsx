@@ -1,4 +1,6 @@
 'use client';
+
+import { author } from '@/lib/shared';
 import {
   type ComponentProps,
   createContext,
@@ -261,7 +263,7 @@ function Input(props: ComponentProps<'textarea'>) {
 
 const roleName: Record<string, string> = {
   user: '你',
-  assistant: 'zongxi',
+  assistant: author.name,
 };
 
 function Message({ message, ...props }: { message: ChatUIMessage } & ComponentProps<'div'>) {

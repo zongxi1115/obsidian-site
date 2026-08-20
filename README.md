@@ -38,6 +38,47 @@ pnpm dev
 
 frontmatter 里还认三个开关，见 [frontmatter 开关](#frontmatter-开关)。
 
+## 换成别的仓库
+
+站点代码里**没有写死任何跟某个仓库有关的东西**。指向另一个 GitHub 仓库只要改 `VAULT_REPO`：
+
+```bash
+VAULT_REPO=https://github.com/someone/their-notes
+VAULT_BRANCH=main
+```
+
+owner / repo 会从这个地址解析出来（`scripts/sync-vault.mjs` 里的 `parseRepo`），写进
+`content/site.json`，「在 GitHub 上编辑」的链接、导航栏的 GitHub 图标、默认站名和作者都从那儿取。
+想覆盖默认值就填这几个（都可选）：
+
+| 变量 | 不填时 |
+| --- | --- |
+| `NEXT_PUBLIC_SITE_NAME` | 仓库名 |
+| `NEXT_PUBLIC_SITE_AUTHOR` | 仓库 owner |
+| `NEXT_PUBLIC_SITE_AUTHOR_URL` | `https://<host>/<owner>` |
+| `NEXT_PUBLIC_SITE_URL` | Vercel 给的域名 |
+
+### 对仓库的要求
+
+其实**跟 Obsidian 没什么关系** —— 需要的只是「一个装着 markdown 的 GitHub 仓库」：
+
+- 任意层级的 `.md` 文件，目录结构直接变成侧栏分组
+- 图片跟笔记放一起就行，路径会自动重写
+- 公开仓库免密克隆；私有仓库把 `VAULT_REPO` 写成
+  `https://x-access-token:<token>@github.com/owner/repo`
+
+Obsidian 特有的写法（`[[双链]]`、`![[嵌入]]`、`> [!tip]`、`==高亮==`、`%%注释%%`）**有就认，没有也不影响**，
+普通 markdown 仓库照样能跑。`.obsidian/`、`.trash/`、`*.excalidraw.md` 会跳过 —— 这些目录不存在也无所谓。
+
+### 已知的水土不服
+
+- **URL 是拼音**（见下一节）。英文文件名原样保留；但日文、韩文、西里尔字母会被
+  `pinyin-pro` 丢掉，退化成 `page`、`page-2`……这种。非中文仓库要改 `toSlug`，
+  换成 `slugify` 之类按 Unicode 转写的库。
+- 侧栏文案（"笔记"、"关系图谱"、"全部笔记"、"散记"）是写死的中文，
+  在 `lib/layout.shared.tsx` 和 `scripts/sync-vault.mjs` 里，不多，要改很快。
+- 评论区的 giscus 仓库是单独配的，不一定要和笔记仓库是同一个。
+
 ## 为什么 URL 是拼音
 
 `计算机网络/计算机体系结构.md` → `/docs/ji-suan-ji-wang-luo/ji-suan-ji-ti-xi-jie-gou`。
