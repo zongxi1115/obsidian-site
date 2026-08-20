@@ -12,9 +12,9 @@ interface Entry {
 
 const MAP = previews as Record<string, Entry>;
 
-const WIDTH = 420;
+const WIDTH = 520;
 const GAP = 10;
-const MAX_HEIGHT = 360;
+const MAX_HEIGHT = 460;
 const OPEN_DELAY = 280;
 const CLOSE_DELAY = 160;
 
@@ -33,6 +33,8 @@ interface Popup extends Entry {
   url: string;
   x: number;
   y: number;
+  /** 窗口窄的时候要收着点 */
+  w: number;
   /** 下面塞不下就翻到链接上方 */
   above: boolean;
 }
@@ -94,11 +96,13 @@ export function LinkPreview() {
       openTimer.current = setTimeout(() => {
         const rect = link.getBoundingClientRect();
         const above = rect.bottom + MAX_HEIGHT > window.innerHeight && rect.top > MAX_HEIGHT;
+        const w = Math.min(WIDTH, window.innerWidth - GAP * 2);
         setPopup({
           ...entry,
           url,
+          w,
           // 尽量对着链接左边，够不着就往回收，别顶出屏幕
-          x: Math.min(Math.max(GAP, rect.left), window.innerWidth - WIDTH - GAP),
+          x: Math.min(Math.max(GAP, rect.left), window.innerWidth - w - GAP),
           y: above ? rect.top - GAP : rect.bottom + GAP,
           above,
         });
@@ -125,15 +129,22 @@ export function LinkPreview() {
       scheduleClose();
     }
 
+    // 捕获阶段才能听到页面里任意容器的滚动；但卡片自己滚不算，不然一滑就没了
+    function onScroll(e: Event) {
+      const target = e.target;
+      if (target instanceof Element && target.closest('[data-link-preview]')) return;
+      close();
+    }
+
     document.addEventListener('mouseover', onOver);
     document.addEventListener('mouseout', onOut);
-    window.addEventListener('scroll', close, true);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('blur', close);
 
     return () => {
       document.removeEventListener('mouseover', onOver);
       document.removeEventListener('mouseout', onOut);
-      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('blur', close);
       clearTimers();
     };
@@ -148,7 +159,7 @@ export function LinkPreview() {
       style={{
         left: popup.x,
         top: popup.y,
-        width: WIDTH,
+        width: popup.w,
         maxHeight: MAX_HEIGHT,
         transform: popup.above ? 'translateY(-100%)' : undefined,
       }}
@@ -161,8 +172,8 @@ export function LinkPreview() {
         scheduleClose();
       }}
     >
-      <div className="flex items-start gap-2 border-b px-3 py-2">
-        <p className="min-w-0 flex-1 truncate text-sm font-medium">{popup.title}</p>
+      <div className="flex items-start gap-2 border-b px-4 py-2.5">
+        <p className="min-w-0 flex-1 truncate font-medium">{popup.title}</p>
         <Link
           href={popup.url}
           title="打开这一篇"
@@ -173,7 +184,7 @@ export function LinkPreview() {
         </Link>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
         {popup.locked ? (
           <p className="text-fd-muted-foreground flex items-center gap-1.5 py-3 text-xs">
             <LockIcon className="size-3.5 shrink-0" />
@@ -187,9 +198,7 @@ export function LinkPreview() {
         ) : body === null ? (
           <p className="text-fd-muted-foreground py-3 text-xs">这一篇读不出来</p>
         ) : (
-          <div className="prose prose-sm prose-no-margin text-xs [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_pre]:text-[11px]">
-            {body}
-          </div>
+          <div className="prose prose-no-margin">{body}</div>
         )}
       </div>
     </div>
