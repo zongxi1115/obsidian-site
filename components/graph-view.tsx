@@ -37,7 +37,7 @@ interface SimNode extends SimulationNodeDatum {
   isFolder: boolean;
 }
 
-type SimLink = SimulationLinkDatum<SimNode> & { kind: 'note' | 'folder' };
+type SimLink = SimulationLinkDatum<SimNode> & { kind: 'note' | 'folder' | 'tree' };
 
 /**
  * 配色照着 Obsidian 的关系图谱来：节点统一是灰蓝色，靠大小和连线表达结构，
@@ -79,7 +79,29 @@ export function GraphView({
   const [transform, setTransform] = useState({ k: 1, x: 0, y: 0 });
   const [, forceRerender] = useState(0);
 
-  const folders = useMemo(() => [...new Set(nodes.map((n) => n.folder))].sort(), [nodes]);
+  const parentOf = (folder: string) =>
+    folder.includes('/') ? folder.slice(0, folder.lastIndexOf('/')) : '';
+
+  /** 目录集合要带上所有祖先 —— 有的目录自己没笔记只有子目录，不补的话父子就断开了 */
+  const folders = useMemo(() => {
+    const set = new Set<string>();
+    for (const n of nodes) {
+      set.add(n.folder);
+      let dir = n.folder;
+      while (dir.includes('/')) {
+        dir = dir.slice(0, dir.lastIndexOf('/'));
+        set.add(dir);
+      }
+    }
+
+    // 根目录只在「它自己有笔记」或者「要用它把好几个顶层目录连起来」时才画，
+    // 不然局部小图里会多出一串 根目录 → LLM → 智能体实践 的空壳
+    const topLevel = [...set].filter((f) => f !== '' && !f.includes('/'));
+    if (!nodes.some((n) => n.folder === '') && topLevel.length < 2) set.delete('');
+    else set.add('');
+
+    return [...set].sort();
+  }, [nodes]);
 
   // 节点和连线：目录节点是可选的虚拟节点，用来在双链还不多的时候把图连起来
   const { simNodes, simLinks } = useMemo(() => {
@@ -108,15 +130,21 @@ export function GraphView({
       for (const folder of folders) {
         const id = `folder:${folder}`;
         const members = nodes.filter((n) => n.folder === folder);
+        const children = folders.filter((f) => f !== folder && parentOf(f) === folder);
         list.push({
           id,
           title: folder === '' ? '根目录' : (folder.split('/').at(-1) ?? folder),
           url: null,
           folder,
-          degree: members.length,
+          degree: members.length + children.length,
           isFolder: true,
         });
         for (const m of members) edges.push({ source: id, target: m.id, kind: 'folder' });
+        // 目录挂到父目录上，整棵目录树才是连着的（父目录被省掉了就不连）
+        const parent = parentOf(folder);
+        if (folder !== '' && folders.includes(parent)) {
+          edges.push({ source: `folder:${parent}`, target: id, kind: 'tree' });
+        }
       }
     }
 
@@ -162,8 +190,8 @@ export function GraphView({
         'link',
         forceLink<SimNode, SimLink>(simLinks)
           .id((d) => d.id)
-          .distance((l) => (l.kind === 'folder' ? 80 : 110) * scale)
-          .strength((l) => (l.kind === 'folder' ? 0.25 : 0.7)),
+          .distance((l) => ({ tree: 60, folder: 80, note: 110 })[l.kind] * scale)
+          .strength((l) => ({ tree: 0.6, folder: 0.25, note: 0.7 })[l.kind]),
       )
       .force(
         'charge',
