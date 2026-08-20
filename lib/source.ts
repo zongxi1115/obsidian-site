@@ -16,6 +16,10 @@ const docs = defineDocs({
       comments: z.boolean().optional(),
       /** password: xxx —— 正文加密后的 base64，明文不进构建产物 */
       encrypted: z.string().optional(),
+      /** tags: [...] —— 标签，页面上显示，也生成 /tags 下的索引页 */
+      tags: z.array(z.string()).optional(),
+      /** 笔记仓库里这个文件最后一次提交的时间 */
+      lastModified: z.string().optional(),
     }),
     postprocess: {
       includeProcessedMarkdown: true,

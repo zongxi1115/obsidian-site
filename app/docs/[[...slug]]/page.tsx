@@ -17,6 +17,7 @@ import { Backlinks } from '@/components/backlinks';
 import { GraphPanel } from '@/components/graph-panel';
 import { ProtectedNote } from '@/components/protected-note';
 import { Comments } from '@/components/comments';
+import { NoteMeta } from '@/components/note-meta';
 import { commentsEnabled } from '@/lib/comments';
 
 export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
@@ -45,6 +46,7 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
     >
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
+      <NoteMeta tags={page.data.tags} lastModified={page.data.lastModified} />
       <div className="flex flex-row gap-2 items-center border-b pb-6">
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover

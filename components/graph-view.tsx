@@ -478,8 +478,11 @@ export function GraphView({
                         fontSize: (compact ? 9 : 11) * (isHovered ? 1.35 : 1),
                         fill: isActive ? ACCENT : isHovered ? TEXT_STRONG : TEXT,
                         fontWeight: isActive || isHovered ? 600 : 400,
+                        // 同时往下挪一点，不然放大后正好被鼠标指针盖住
+                        transform: isHovered ? `translateY(${compact ? 6 : 8}px)` : undefined,
                         pointerEvents: 'none',
-                        transition: 'font-size 160ms ease-out, fill 160ms ease-out',
+                        transition:
+                          'font-size 160ms ease-out, fill 160ms ease-out, transform 160ms ease-out',
                       }}
                     >
                       {n.title}

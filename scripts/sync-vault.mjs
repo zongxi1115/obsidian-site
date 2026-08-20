@@ -11,6 +11,7 @@
  *   content/graph.json     —— 双链图谱的节点/连线/反向链接
  *   content/previews.json  —— 每篇的标题/是否上锁，鼠标浮到双链上弹的那个小窗用
  *   content/site.json      —— 从 VAULT_REPO 解析出来的仓库信息，「编辑此页」和默认站名靠它
+ *   content/tags.json      —— 标签 → 笔记，/tags 那几个页面用
  *   public/previews/**     —— 那个小窗里要渲染的正文（截断过），悬浮时才去取
  *   public/vault/**      —— 笔记里引用到的图片
  */
@@ -19,6 +20,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createCipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { pinyin } from 'pinyin-pro';
+import GithubSlugger from 'github-slugger';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -34,6 +36,7 @@ const OUT_MAP = path.join(ROOT, 'content/vault-map.json');
 const OUT_GRAPH = path.join(ROOT, 'content/graph.json');
 const OUT_PREVIEWS = path.join(ROOT, 'content/previews.json');
 const OUT_SITE = path.join(ROOT, 'content/site.json');
+const OUT_TAGS = path.join(ROOT, 'content/tags.json');
 const OUT_ASSETS = path.join(ROOT, 'public/vault');
 const OUT_PREVIEW_DOCS = path.join(ROOT, 'public/previews');
 const CACHE = path.join(ROOT, '.vault-cache');
@@ -96,17 +99,19 @@ function resolveVault() {
 
   try {
     if (fs.existsSync(path.join(CACHE, '.git'))) {
-      execFileSync('git', ['-C', CACHE, 'fetch', '--depth', '1', 'origin', VAULT_BRANCH], {
-        stdio: 'inherit',
-      });
+      execFileSync('git', ['-C', CACHE, 'fetch', 'origin', VAULT_BRANCH], { stdio: 'inherit' });
       execFileSync('git', ['-C', CACHE, 'reset', '--hard', `origin/${VAULT_BRANCH}`], {
         stdio: 'inherit',
       });
     } else {
       fs.rmSync(CACHE, { recursive: true, force: true });
-      execFileSync('git', ['clone', '--depth', '1', '--branch', VAULT_BRANCH, VAULT_REPO, CACHE], {
-        stdio: 'inherit',
-      });
+      // 用 blobless 而不是 --depth 1：要留着提交历史才能算每篇的「最后更新」，
+      // 但不下载历史版本的文件内容，速度和浅克隆差不多
+      execFileSync(
+        'git',
+        ['clone', '--filter=blob:none', '--branch', VAULT_BRANCH, VAULT_REPO, CACHE],
+        { stdio: 'inherit' },
+      );
     }
   } catch {
     throw new Error(
@@ -165,15 +170,43 @@ function uniqueSlug(name, used) {
 
 const yamlString = (s) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
+const unquote = (v) => v.replace(/^["']|["']$/g, '').trim();
+
 function stripFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
   if (!m) return { data: {}, body: text };
   const data = {};
+  let listKey = null;
   for (const line of m[1].split(/\r?\n/)) {
+    // YAML 列表：紧跟在 "key:" 后面的 "  - 值"。tags 经常这么写
+    const item = /^\s*-\s+(.*)$/.exec(line);
+    if (listKey && item) {
+      data[listKey].push(unquote(item[1]));
+      continue;
+    }
+    listKey = null;
+
     const kv = /^([A-Za-z_-]+):\s*(.*)$/.exec(line);
-    if (kv) data[kv[1]] = kv[2].replace(/^["']|["']$/g, '').trim();
+    if (!kv) continue;
+    const [, key, raw] = kv;
+
+    if (raw.trim() === '') {
+      listKey = key; // 值在下面几行的列表里
+      data[key] = [];
+    } else if (/^\[.*\]$/.test(raw.trim())) {
+      data[key] = raw.trim().slice(1, -1).split(',').map(unquote).filter(Boolean); // tags: [a, b]
+    } else {
+      data[key] = unquote(raw);
+    }
   }
   return { data, body: text.slice(m[0].length) };
+}
+
+/** tags 可以写成数组、逗号分隔、或者带 # 前缀，统一成干净的字符串数组 */
+function readTags(data) {
+  const raw = data.tags ?? data.tag ?? [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(/[,，\s]+/);
+  return [...new Set(list.map((t) => String(t).replace(/^#/, '').trim()).filter(Boolean))];
 }
 
 /* ------------------------------------------------------- frontmatter 开关 */
@@ -215,11 +248,52 @@ function makePreviewBody(body, limit = 2400) {
   return `${(boundary > limit / 3 ? cut.slice(0, boundary) : cut).trimEnd()}\n\n……`;
 }
 
+/**
+ * 每篇的「最后更新」时间，从笔记仓库的 git 历史里读。
+ *
+ * 一次 git log 把所有文件的提交时间都拿到（一个文件一个进程太慢了），
+ * 输出是「时间戳 + 该次提交改动的文件列表」交替出现，第一次见到某个文件
+ * 就是它最近一次被改的时间。
+ *
+ * 仓库不是 git、或者是浅克隆没有历史，就返回空对象，页面上不显示。
+ */
+function readLastModified(dir, notePaths) {
+  const wanted = new Set(notePaths);
+  const out = {};
+  let log;
+
+  try {
+    log = execFileSync('git', ['-C', dir, 'log', '--pretty=format:%cI', '--name-only', '-z'], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    console.warn('[sync] 读不到 git 历史，页面上不显示「最后更新」');
+    return out;
+  }
+
+  let current = null;
+  for (const chunk of log.split('\0')) {
+    const line = chunk.trim();
+    if (!line) continue;
+    // 时间戳那一行后面可能还粘着上一批文件名，用换行再切一次
+    const parts = line.split('\n');
+    for (const part of parts) {
+      const value = part.trim();
+      if (!value) continue;
+      if (/^\d{4}-\d{2}-\d{2}T/.test(value)) current = value;
+      else if (current && wanted.has(value) && !out[value]) out[value] = current;
+    }
+  }
+  return out;
+}
+
 /** 用正文第一段做简介 */
 function makeDescription(body) {
   for (const block of body.split(/\r?\n\s*\r?\n/)) {
     const line = block
       .trim()
+      .replace(/<[^>]+>/g, '') // 裸 HTML 标签
       .replace(/%%[\s\S]*?%%/g, '') // Obsidian 的注释
       .replace(/^\s*>\s?/gm, '') // 引用 / callout 的 > 前缀
       .replace(/^\[![\w-]+\][+-]?\s*/gm, '') // callout 的 [!tip] 标记
@@ -281,6 +355,13 @@ for (const p of assets) {
 }
 
 const docUrl = (notePath) => `/docs/${noteSlugPath.get(notePath)}`;
+
+/**
+ * [[笔记#小节]] 里的锚点要和页面上标题的 id 对得上。
+ * fumadocs 用 github-slugger 生成标题 id（去标点、空格转连字符），
+ * 以前这里直接 encodeURIComponent，带标点的标题就跳不过去。
+ */
+const headingAnchor = (text) => new GithubSlugger().slug(text.trim());
 // 图片名里的空格等字符也编码一下，避免 markdown 链接被截断
 const assetUrl = (assetPath) => `/vault/${assetPath.split('/').map(encodeURIComponent).join('/')}`;
 
@@ -294,6 +375,77 @@ function resolveNote(target) {
 function resolveAsset(target) {
   const clean = target.replace(/^\.\//, '');
   return assetByPath.get(clean) ?? assetByName.get(path.basename(clean)) ?? null;
+}
+
+/* ------------------------------------------------------------ 笔记嵌入 */
+
+/** 原始笔记路径 → 去掉 frontmatter 的正文，嵌入的时候要取 */
+const noteBodies = new Map();
+
+/** 从一篇笔记里截出某个小节：从匹配的标题开始，到下一个同级或更高级标题为止 */
+function sliceSection(body, heading) {
+  const lines = body.split(/\r?\n/);
+  const wanted = headingAnchor(heading);
+  let start = -1;
+  let level = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(#{1,6})\s+(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    if (start === -1) {
+      if (headingAnchor(m[2]) === wanted) {
+        start = i;
+        level = m[1].length;
+      }
+      continue;
+    }
+    if (m[1].length <= level) return lines.slice(start, i).join('\n');
+  }
+  return start === -1 ? null : lines.slice(start).join('\n');
+}
+
+/**
+ * ![[笔记]] / ![[笔记#小节]] —— Obsidian 的「嵌入」，把整篇（或某一节）原地展开。
+ *
+ * 产出的是一段裸 HTML 包着 markdown：`<div>` 后面空一行，CommonMark 就会把里面
+ * 当普通 markdown 解析，再靠 rehype-raw 把外层 div 还原成元素（样式在 global.css）。
+ *
+ * depth 限制递归层数，顺便防止两篇互相嵌入把脚本转死。
+ */
+function expandEmbeds(body, notePath, outgoing, depth = 0) {
+  if (depth >= 2) return body;
+
+  return body.replace(/^[ \t]*!\[\[([^\]\n]+)\]\][ \t]*$/gm, (raw, inner) => {
+    const [linkPart, alias] = inner.split('|').map((s) => s.trim());
+    const [target, hash] = linkPart.split('#');
+
+    if (resolveAsset(target)) return raw; // 图片交给下面的 rewriteLinks
+    const note = resolveNote(target);
+    if (!note || note === notePath) return raw;
+
+    const source = noteBodies.get(note);
+    if (source === undefined) return raw;
+
+    const section = hash ? sliceSection(source, hash) : source;
+    if (section === null) {
+      console.warn(`[sync] ${notePath}: 嵌入的 [[${inner}]] 里找不到小节「${hash}」`);
+      return raw;
+    }
+
+    outgoing.add(note);
+    const title = alias ?? (hash ? `${path.basename(note, '.md')} › ${hash}` : path.basename(note, '.md'));
+    const inner_ = expandEmbeds(section.trim(), note, outgoing, depth + 1);
+
+    return [
+      `<div class="note-embed">`,
+      '',
+      `<a class="note-embed-title" href="${docUrl(note)}${hash ? `#${headingAnchor(hash)}` : ''}">${title}</a>`,
+      '',
+      inner_,
+      '',
+      '</div>',
+    ].join('\n');
+  });
 }
 
 /**
@@ -312,7 +464,7 @@ function rewriteLinks(body, notePath, outgoing) {
     const note = resolveNote(target);
     if (note) {
       if (note !== notePath) outgoing.add(note);
-      const anchor = hash ? `#${encodeURIComponent(hash.trim())}` : '';
+      const anchor = hash ? `#${headingAnchor(hash)}` : '';
       return `[${label}](${docUrl(note)}${anchor})`;
     }
 
@@ -333,7 +485,7 @@ function rewriteLinks(body, notePath, outgoing) {
     const note = targetPath ? resolveNote(targetPath) : null;
     if (note) {
       if (note !== notePath) outgoing.add(note);
-      const anchor = hash ? `#${encodeURIComponent(hash)}` : '';
+      const anchor = hash ? `#${headingAnchor(hash)}` : '';
       return `[${text}](${docUrl(note)}${anchor})`;
     }
     return raw;
@@ -350,23 +502,36 @@ fs.mkdirSync(OUT_DOCS, { recursive: true });
 const written = [];
 const vaultMap = {}; // 站点页面路径 → 笔记仓库里的原始路径
 
+// 先把所有笔记读一遍：![[笔记]] 嵌入要拿到别篇的正文，没法边读边处理
+const parsed = new Map();
 for (const notePath of notes) {
-  const raw = fs.readFileSync(path.join(vault, notePath), 'utf8');
-  const { data, body: rawBody } = stripFrontmatter(raw);
+  const { data, body } = stripFrontmatter(fs.readFileSync(path.join(vault, notePath), 'utf8'));
+  parsed.set(notePath, data);
+  // 上了锁的不给别人嵌入，不然口令就白设了
+  if (!String(data.password ?? '').trim()) noteBodies.set(notePath, body);
+}
+
+const lastModified = readLastModified(vault, notes);
+
+for (const notePath of notes) {
+  const data = parsed.get(notePath);
 
   // 标题就用文件名 —— Obsidian 里文件名本来就是标题。
   // 正文一律原样保留，不去猜哪个 # 是"整篇的标题"。
-  let body = rawBody;
+  let body = stripFrontmatter(fs.readFileSync(path.join(vault, notePath), 'utf8')).body;
   const title = data.title ?? path.basename(notePath, '.md');
 
   const hidden = isHidden(data);
   const password = String(data.password ?? '').trim();
+  const tags = readTags(data);
+
+  // 简介要在展开嵌入之前算，不然会把嵌进来的别篇内容当成自己的开头
+  const description = data.description ?? (password ? undefined : makeDescription(body));
 
   const outgoing = new Set();
+  body = expandEmbeds(body, notePath, outgoing); // 先展开嵌入，再统一改链接
   body = rewriteLinks(body, notePath, outgoing);
 
-  // 加密的那篇，简介也不能自动生成 —— 那等于把开头一段明文抄到侧栏和搜索结果里
-  const description = data.description ?? (password ? undefined : makeDescription(body));
   const encrypted = password ? encryptBody(body.trimStart(), password) : undefined;
   const rewritten = body;
   if (password) {
@@ -381,6 +546,8 @@ for (const notePath of notes) {
     ...(hidden ? ['display: none'] : []),
     ...(commentsOff(data) ? ['comments: false'] : []),
     ...(encrypted ? [`encrypted: ${yamlString(encrypted)}`] : []),
+    ...(tags.length ? [`tags: [${tags.map(yamlString).join(', ')}]`] : []),
+    ...(lastModified[notePath] ? [`lastModified: ${yamlString(lastModified[notePath])}`] : []),
     '---',
     '',
   ].join('\n');
@@ -395,6 +562,7 @@ for (const notePath of notes) {
     slugPath,
     title,
     hidden,
+    tags,
     locked: Boolean(password),
     previewBody: password ? '' : makePreviewBody(rewritten),
     outgoing: [...outgoing],
@@ -517,6 +685,30 @@ for (const { source, target } of links) {
 fs.writeFileSync(
   OUT_GRAPH,
   `${JSON.stringify({ nodes, links, backlinks }, null, 2)}\n`,
+);
+
+/* ------------------------------------------------------------- 标签 */
+
+// tag → 这个标签下的笔记，/tags 和 /tags/xxx 两个页面用
+const byTag = new Map();
+for (const item of listed) {
+  for (const tag of item.tags) {
+    if (!byTag.has(tag)) byTag.set(tag, []);
+    byTag.get(tag).push({ title: item.title, url: `/docs/${item.slugPath}` });
+  }
+}
+
+fs.writeFileSync(
+  OUT_TAGS,
+  `${JSON.stringify(
+    Object.fromEntries(
+      [...byTag.entries()]
+        .sort(([a], [b]) => a.localeCompare(b, 'zh'))
+        .map(([tag, items]) => [tag, items.sort((a, b) => a.title.localeCompare(b.title, 'zh'))]),
+    ),
+    null,
+    2,
+  )}\n`,
 );
 
 const hiddenCount = written.length - listed.length;

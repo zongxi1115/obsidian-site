@@ -50,3 +50,32 @@ summary::-webkit-details-marker {
 [data-toc-popover-content] > div {
   max-height: min(80vh, 40rem);
 }
+
+/*
+ * ![[笔记]] 嵌入进来的那一块（Obsidian 的 embed）。
+ * 左边一条竖线 + 缩进，跟正文区分开，右上角是原文链接。
+ */
+.prose .note-embed {
+  position: relative;
+  margin: 1.5rem 0;
+  padding: 0.25rem 0 0.25rem 1.25rem;
+  border-inline-start: 2px solid var(--color-fd-border);
+}
+
+.prose .note-embed .note-embed-title {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-fd-muted-foreground);
+  text-decoration: none;
+}
+
+.prose .note-embed .note-embed-title:hover {
+  color: var(--color-fd-primary);
+}
+
+/* 嵌套的嵌入不要一层层越缩越深 */
+.prose .note-embed .note-embed {
+  margin: 0.75rem 0;
+}

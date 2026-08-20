@@ -10,6 +10,7 @@ export function baseOptions(): BaseLayoutProps {
     links: [
       { text: '笔记', url: '/docs' },
       { text: '关系图谱', url: '/graph' },
+      { text: '标签', url: '/tags' },
     ],
     githubUrl: vaultRepoUrl,
   };
