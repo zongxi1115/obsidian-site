@@ -190,6 +190,31 @@ export function GraphView({
   const dragging = useRef<SimNode | null>(null);
   const panning = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const moved = useRef(false);
+  /**
+   * 按下去的那个节点先放这儿，手指移动超过阈值才算真的在拖。
+   * 手指本来就会抖几像素，以前一动就当拖拽，导致手机上点节点老是跳不过去。
+   */
+  const pending = useRef<{
+    node: SimNode;
+    x: number;
+    y: number;
+    pointerId: number;
+    target: Element;
+    touch: boolean;
+  } | null>(null);
+
+  const dragThreshold = (touch: boolean) => (touch ? 12 : 4);
+
+  // 触屏上给节点套一圈更大的透明命中区，鼠标就不用了（免得点歪到邻居身上）
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse)');
+    const sync = () => setCoarse(mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+  const hitPadding = coarse ? 10 : 3;
 
   const toSimCoords = (clientX: number, clientY: number) => {
     const rect = wrapperRef.current?.getBoundingClientRect();
@@ -215,8 +240,22 @@ export function GraphView({
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (dragging.current) {
+    const p = pending.current;
+    if (p) {
+      const dist = Math.hypot(e.clientX - p.x, e.clientY - p.y);
+      if (dist < dragThreshold(p.touch)) return; // 还在抖动范围里，当没动
+      // 真的开始拖了，这时候才抓指针、才让 d3 跟手
+      try {
+        p.target.setPointerCapture?.(p.pointerId);
+      } catch {
+        // 指针已经不在了（触控、合成事件等），捕获失败不影响拖拽
+      }
+      dragging.current = p.node;
       moved.current = true;
+      pending.current = null;
+    }
+
+    if (dragging.current) {
       const { x, y } = toSimCoords(e.clientX, e.clientY);
       dragging.current.fx = x;
       dragging.current.fy = y;
@@ -241,6 +280,7 @@ export function GraphView({
     }
     dragging.current = null;
     panning.current = null;
+    pending.current = null;
   };
 
   /* ---------------------------------------------------------- 高亮 */
@@ -368,13 +408,15 @@ export function GraphView({
                   className={n.url ? 'cursor-pointer' : 'cursor-grab'}
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    try {
-                      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-                    } catch {
-                      // 指针已经不在了（触控、合成事件等），捕获失败不影响拖拽
-                    }
-                    dragging.current = n;
                     moved.current = false;
+                    pending.current = {
+                      node: n,
+                      x: e.clientX,
+                      y: e.clientY,
+                      pointerId: e.pointerId,
+                      target: e.currentTarget as Element,
+                      touch: e.pointerType !== 'mouse',
+                    };
                   }}
                   onPointerEnter={() => setHovered(n.id)}
                   onPointerLeave={() => setHovered(null)}
@@ -383,6 +425,9 @@ export function GraphView({
                     if (n.url && !moved.current) router.push(n.url);
                   }}
                 >
+                  {/* 手指点得到的范围：圆点本身太小了，套一圈透明的
+                      （除以缩放系数，保证屏幕上看到的那圈始终一样大） */}
+                  <circle r={r + hitPadding / transform.k} fill="transparent" />
                   <circle
                     r={r}
                     style={{

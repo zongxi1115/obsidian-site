@@ -9,6 +9,7 @@
  *   content/docs/**      —— 加好 frontmatter、转换过链接的 markdown，文件名是拼音
  *   content/vault-map.json —— 页面路径 → 笔记仓库里的原始路径（给"编辑此页"用）
  *   content/graph.json     —— 双链图谱的节点/连线/反向链接
+ *   content/previews.json  —— 每篇的摘要，鼠标浮到双链上弹的那个小窗用
  *   public/vault/**      —— 笔记里引用到的图片
  */
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ try {
 const OUT_DOCS = path.join(ROOT, 'content/docs');
 const OUT_MAP = path.join(ROOT, 'content/vault-map.json');
 const OUT_GRAPH = path.join(ROOT, 'content/graph.json');
+const OUT_PREVIEWS = path.join(ROOT, 'content/previews.json');
 const OUT_ASSETS = path.join(ROOT, 'public/vault');
 const CACHE = path.join(ROOT, '.vault-cache');
 
@@ -165,6 +167,24 @@ function encryptBody(text, password) {
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
   return Buffer.concat([salt, iv, data, cipher.getAuthTag()]).toString('base64');
+}
+
+/** 鼠标浮到双链上时弹的那个小窗，要一段干净的纯文本 */
+function makeExcerpt(body, limit = 160) {
+  const text = body
+    .replace(/```[\s\S]*?```/g, ' ') // 代码块
+    .replace(/\$\$[\s\S]*?\$\$/g, ' ') // 行间公式
+    .replace(/%%[\s\S]*?%%/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // 图片
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/^\[![\w-]+\][+-]?\s*/gm, '')
+    .replace(/^\s*#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/[`*_~=|$]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
 /** 用正文第一段做简介 */
@@ -319,6 +339,7 @@ for (const notePath of notes) {
   // 加密的那篇，简介也不能自动生成 —— 那等于把开头一段明文抄到侧栏和搜索结果里
   const description = data.description ?? (password ? undefined : makeDescription(body));
   const encrypted = password ? encryptBody(body.trimStart(), password) : undefined;
+  const rewritten = body;
   if (password) {
     console.log(`[sync] ${notePath} 已加密（口令保护）`);
     body = ''; // 产物里不留明文
@@ -340,7 +361,15 @@ for (const notePath of notes) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, frontmatter + body.trimStart());
   vaultMap[`${slugPath}.md`] = notePath;
-  written.push({ notePath, slugPath, title, hidden, outgoing: [...outgoing] });
+  written.push({
+    notePath,
+    slugPath,
+    title,
+    hidden,
+    locked: Boolean(password),
+    excerpt: password ? '' : makeExcerpt(rewritten),
+    outgoing: [...outgoing],
+  });
 }
 
 /** display: none 的笔记：不进侧栏、不进首页索引、不进图谱、不进搜索。链接照样能打开 */
@@ -459,6 +488,22 @@ fs.writeFileSync(
 );
 
 const hiddenCount = written.length - listed.length;
+// 双链的悬浮预览：按站点 URL 索引，前端拿 href 直接查
+fs.writeFileSync(
+  OUT_PREVIEWS,
+  `${JSON.stringify(
+    Object.fromEntries(
+      written.map((item) => [
+        `/docs/${item.slugPath}`,
+        { title: item.title, excerpt: item.excerpt, locked: item.locked },
+      ]),
+    ),
+    null,
+    2,
+  )}
+`,
+);
+
 console.log(
   `[sync] 完成：${written.length} 篇笔记${hiddenCount ? `（其中 ${hiddenCount} 篇不列出来）` : ''}，` +
     `${assets.length} 张图片，${links.length} 条双链`,

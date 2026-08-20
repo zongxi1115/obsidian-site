@@ -6,6 +6,7 @@ import { AISearch, AISearchPanel, AISearchTrigger } from '@/components/ai/search
 import { buttonVariants } from 'fumadocs-ui/components/ui/button';
 import { MessageCircleIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { LinkPreview } from '@/components/link-preview';
 
 export default function Layout({ children }: LayoutProps<'/docs'>) {
   return (
@@ -29,6 +30,8 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
         </AISearch>
       )}
       {children}
+      {/* 鼠标浮到双链上弹的那个小窗 */}
+      <LinkPreview />
     </DocsLayout>
   );
 }
