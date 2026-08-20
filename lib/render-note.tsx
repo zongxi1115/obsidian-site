@@ -9,9 +9,7 @@ import { visit } from 'unist-util-visit';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import { Children, type ComponentProps, type ReactElement, type ReactNode } from 'react';
 import { DynamicCodeBlock } from 'fumadocs-ui/components/dynamic-codeblock';
-import { ImageZoom } from 'fumadocs-ui/components/image-zoom';
 import { getMDXComponents } from '@/components/mdx';
-import { cn } from '@/lib/cn';
 import { remarkObsidianCallout, remarkObsidianInline } from '@/lib/mdx/remark-obsidian';
 
 /**
@@ -35,20 +33,6 @@ function rehypeMdxToElements() {
       Object.assign(node, { type: 'element', tagName: node.name, properties });
     });
   };
-}
-
-/**
- * 构建期那条流水线里 remarkImage 会去读图片文件、把 width/height 填好，
- * next/image 才不会报错。这里是运行时渲染的，没这一步，所以退回原生 <img>。
- * ImageZoom 传了 children 就不会再套 next/image，点击放大还是有的。
- */
-function Img({ className, ...props }: ComponentProps<'img'>) {
-  return (
-    <ImageZoom {...({ src: props.src } as ComponentProps<typeof ImageZoom>)}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img {...props} alt={props.alt ?? ''} className={cn('rounded-lg', className)} />
-    </ImageZoom>
-  );
 }
 
 function Pre(props: ComponentProps<'pre'>) {
@@ -84,6 +68,6 @@ export async function renderNote(markdown: string): Promise<ReactNode> {
     jsx,
     jsxs,
     Fragment,
-    components: getMDXComponents({ pre: Pre, img: Img }) as never,
+    components: getMDXComponents({ pre: Pre }) as never,
   });
 }

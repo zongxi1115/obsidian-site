@@ -80,7 +80,23 @@ function parseRepo(url) {
 
 const repoInfo = parseRepo(VAULT_REPO);
 
-const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.avif']);
+// 宁可多认几种：认不出来的图会被当成死链降级掉，白白少一张图
+const IMAGE_EXT = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.jfif',
+  '.gif',
+  '.svg',
+  '.webp',
+  '.avif',
+  '.bmp',
+  '.ico',
+  '.tif',
+  '.tiff',
+  '.apng',
+  '.heic',
+]);
 const SKIP_DIRS = new Set(['.git', '.obsidian', '.trash', '.claudian', 'node_modules', 'Excalidraw']);
 
 /* ---------------------------------------------------------------- 取内容源 */
@@ -472,14 +488,33 @@ function rewriteLinks(body, notePath, outgoing) {
     return label; // 找不到就退化成纯文本，避免死链
   });
 
-  // 普通 markdown 链接：图片换成站点路径，指向 .md 的换成页面路径
-  out = out.replace(/(!?)\[([^\]]*)\]\(([^)\s]+)\)/g, (raw, bang, text, href) => {
+  // 普通 markdown 链接：图片换成站点路径，指向 .md 的换成页面路径。
+  // 括号里整段取，这样 ![](Pasted image 2026.png) 这种带空格的路径也认
+  out = out.replace(/(!?)\[([^\]]*)\]\(([^)]+)\)/g, (raw, bang, text, target) => {
+    // 尾巴上可能挂着 markdown 的 title： [x](y "标题")
+    const withTitle = /^(.*?)\s+("[^"]*"|'[^']*')$/.exec(target.trim());
+    const title = withTitle ? ` ${withTitle[2]}` : '';
+    const href = (withTitle ? withTitle[1] : target).trim().replace(/^<|>$/g, '');
+
     if (/^(https?:|\/|#|data:|mailto:)/.test(href)) return raw;
-    const decoded = decodeURIComponent(href);
+
+    let decoded = href;
+    try {
+      decoded = decodeURIComponent(href);
+    } catch {
+      // 路径里有落单的 % 之类，解不开就按原样当路径用
+    }
 
     const asset = resolveAsset(decoded);
-    if (asset) return `![${text}](${assetUrl(asset)})`;
-    if (bang) return raw;
+    if (asset) return `![${text}](${assetUrl(asset)}${title})`;
+
+    if (bang) {
+      // 图片没找到就地降级成 alt 文本。
+      // 千万不能原样留着：remarkImage 会把相对路径编译成真正的 import，
+      // 文件不存在的话整个构建直接失败（Module not found）。
+      console.warn(`[sync] ${notePath}: 找不到图片 ${href}，已降级成文字`);
+      return text;
+    }
 
     const [targetPath, hash] = decoded.split('#');
     const note = targetPath ? resolveNote(targetPath) : null;
