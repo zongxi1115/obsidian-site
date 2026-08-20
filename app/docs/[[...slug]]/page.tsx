@@ -11,7 +11,7 @@ import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
-import { gitConfig } from '@/lib/shared';
+import { appName, author, gitConfig } from '@/lib/shared';
 import vaultMap from '@/content/vault-map.json';
 import { Backlinks } from '@/components/backlinks';
 import { GraphPanel } from '@/components/graph-panel';
@@ -66,6 +66,23 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
       {/* 首页那种生成出来的索引页没有对应笔记，就不显示反链 */}
       {vaultPath && <Backlinks id={graphId} />}
       {showComments && <Comments />}
+      {/* 结构化数据：搜索引擎和分享卡片认这个，作者署名比 meta 标签更硬 */}
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': vaultPath ? 'BlogPosting' : 'CollectionPage',
+            headline: page.data.title,
+            description: page.data.description,
+            author: { '@type': 'Person', name: author.name, url: author.url },
+            publisher: { '@type': 'Person', name: author.name, url: author.url },
+            inLanguage: 'zh-CN',
+            isAccessibleForFree: !encrypted,
+          }),
+        }}
+      />
     </DocsPage>
   );
 }
@@ -79,10 +96,32 @@ export async function generateMetadata(props: PageProps<'/docs/[[...slug]]'>): P
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  // 藏起来的和上了锁的不进搜索引擎
+  const noIndex = page.data.display === 'none' || Boolean(page.data.encrypted);
+
   return {
     title: page.data.title,
     description: page.data.description,
+    authors: [author],
+    creator: author.name,
+    publisher: author.name,
+    alternates: { canonical: page.url },
+    ...(noIndex ? { robots: { index: false, follow: false } } : {}),
     openGraph: {
+      type: 'article',
+      title: page.data.title,
+      description: page.data.description,
+      url: page.url,
+      siteName: appName,
+      locale: 'zh_CN',
+      authors: [author.name],
+      images: getPageImageUrl(page).url,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: page.data.title,
+      description: page.data.description,
+      creator: author.name,
       images: getPageImageUrl(page).url,
     },
   };

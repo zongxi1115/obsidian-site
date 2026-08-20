@@ -2,22 +2,20 @@ import { RootProvider } from 'fumadocs-ui/provider/next';
 import './global.css';
 import { Inter } from 'next/font/google';
 import type { Metadata } from 'next';
-import { appName } from '@/lib/shared';
+import { appName, author, siteUrl } from '@/lib/shared';
 
 const inter = Inter({
   subsets: ['latin'],
 });
 
-// 生成 OG 图需要一个绝对地址：优先用自己配的域名，其次用 Vercel 给的地址
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : 'http://localhost:3000');
-
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: { default: appName, template: `%s | ${appName}` },
+  // 站点级的默认署名，每一页的 generateMetadata 里还会再写一次
+  authors: [author],
+  creator: author.name,
+  publisher: author.name,
+  openGraph: { siteName: appName, locale: 'zh_CN', type: 'website' },
 };
 
 export default function Layout({ children }: LayoutProps<'/'>) {
