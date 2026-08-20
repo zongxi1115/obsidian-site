@@ -1,25 +1,39 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { LockIcon } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import Link from 'fumadocs-core/link';
+import { LinkIcon, LoaderCircleIcon, LockIcon } from 'lucide-react';
 import previews from '@/content/previews.json';
 
-interface Preview {
+interface Entry {
   title: string;
-  excerpt: string;
   locked?: boolean;
 }
 
-const MAP = previews as Record<string, Preview>;
+const MAP = previews as Record<string, Entry>;
 
-const WIDTH = 320;
+const WIDTH = 420;
 const GAP = 10;
-const DELAY = 260;
+const MAX_HEIGHT = 360;
+const OPEN_DELAY = 280;
+const CLOSE_DELAY = 160;
 
-interface Popup extends Preview {
+/** 渲染好的正文按 url 缓存，同一篇再浮第二次就是瞬间的 */
+const cache = new Map<string, Promise<ReactNode>>();
+
+async function loadBody(url: string): Promise<ReactNode> {
+  const res = await fetch(`/previews${url.slice('/docs'.length)}.md`);
+  if (!res.ok) throw new Error(String(res.status));
+  // 渲染器跟口令解锁那边是同一个，带 GFM / 公式 / callout / 代码高亮
+  const { renderNote } = await import('@/lib/render-note');
+  return renderNote(await res.text());
+}
+
+interface Popup extends Entry {
+  url: string;
   x: number;
   y: number;
-  /** 空间不够就翻到链接上方 */
+  /** 下面塞不下就翻到链接上方 */
   above: boolean;
 }
 
@@ -31,13 +45,33 @@ interface Popup extends Preview {
  */
 export function LinkPreview() {
   const [popup, setPopup] = useState<Popup | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [body, setBody] = useState<ReactNode>();
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 指针在链接上或者在卡片上，都算「还想看」 */
+  const alive = useRef({ link: false, card: false });
 
-  const cancel = useCallback(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
+  const clearTimers = () => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    openTimer.current = null;
+    closeTimer.current = null;
+  };
+
+  const close = useCallback(() => {
+    clearTimers();
+    alive.current = { link: false, card: false };
     setPopup(null);
+    setBody(undefined);
   }, []);
+
+  /** 离开链接或卡片：等一下再关，好让鼠标能从链接挪到卡片上 */
+  const scheduleClose = useCallback(() => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => {
+      if (!alive.current.link && !alive.current.card) close();
+    }, CLOSE_DELAY);
+  }, [close]);
 
   useEffect(() => {
     // 触屏没有 hover，弹出来只会挡着内容
@@ -48,78 +82,116 @@ export function LinkPreview() {
       const link = target?.closest?.('a[href]') as HTMLAnchorElement | null;
       if (!link) return;
       // 侧栏、导航、目录里的链接不弹，只管正文和反向链接
-      if (link.closest('aside, nav, header, [role="dialog"]')) return;
+      if (link.closest('aside, nav, header, [role="dialog"], [data-link-preview]')) return;
 
-      const href = link.getAttribute('href') ?? '';
-      if (!href.startsWith('/docs/')) return;
-      const data = MAP[href.split('#')[0]];
-      if (!data) return;
+      const url = (link.getAttribute('href') ?? '').split('#')[0];
+      const entry = MAP[url];
+      if (!entry) return;
 
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
+      alive.current.link = true;
+      clearTimers();
+
+      openTimer.current = setTimeout(() => {
         const rect = link.getBoundingClientRect();
-        const above = rect.bottom + 180 > window.innerHeight;
+        const above = rect.bottom + MAX_HEIGHT > window.innerHeight && rect.top > MAX_HEIGHT;
         setPopup({
-          ...data,
+          ...entry,
+          url,
           // 尽量对着链接左边，够不着就往回收，别顶出屏幕
           x: Math.min(Math.max(GAP, rect.left), window.innerWidth - WIDTH - GAP),
           y: above ? rect.top - GAP : rect.bottom + GAP,
           above,
         });
-      }, DELAY);
+        setBody(undefined);
+
+        if (entry.locked) return;
+        const pending = cache.get(url) ?? loadBody(url);
+        cache.set(url, pending);
+        pending.then(
+          (node) => setBody(node),
+          () => {
+            cache.delete(url);
+            setBody(null);
+          },
+        );
+      }, OPEN_DELAY);
     }
 
     function onOut(e: MouseEvent) {
-      const from = e.target as Element | null;
-      if (!from?.closest?.('a[href]')) return;
-      const to = e.relatedTarget as Element | null;
-      if (to?.closest?.('a[href]') === from.closest('a[href]')) return;
-      cancel();
+      const from = (e.target as Element | null)?.closest?.('a[href]');
+      if (!from) return;
+      if ((e.relatedTarget as Element | null)?.closest?.('a[href]') === from) return;
+      alive.current.link = false;
+      scheduleClose();
     }
 
     document.addEventListener('mouseover', onOver);
     document.addEventListener('mouseout', onOut);
-    window.addEventListener('scroll', cancel, true);
-    window.addEventListener('blur', cancel);
-    document.addEventListener('click', cancel);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('blur', close);
 
     return () => {
       document.removeEventListener('mouseover', onOver);
       document.removeEventListener('mouseout', onOut);
-      window.removeEventListener('scroll', cancel, true);
-      window.removeEventListener('blur', cancel);
-      document.removeEventListener('click', cancel);
-      if (timer.current) clearTimeout(timer.current);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('blur', close);
+      clearTimers();
     };
-  }, [cancel]);
+  }, [close, scheduleClose]);
 
   if (!popup) return null;
 
   return (
     <div
-      role="tooltip"
-      // 不吃鼠标事件，纯展示，免得挡住底下的链接
-      className="animate-fd-fade-in bg-fd-popover text-fd-popover-foreground pointer-events-none fixed z-50 rounded-xl border p-3 shadow-lg"
+      data-link-preview
+      className="animate-fd-fade-in bg-fd-popover text-fd-popover-foreground fixed z-50 flex flex-col overflow-hidden rounded-xl border shadow-xl"
       style={{
         left: popup.x,
         top: popup.y,
         width: WIDTH,
+        maxHeight: MAX_HEIGHT,
         transform: popup.above ? 'translateY(-100%)' : undefined,
       }}
+      onMouseEnter={() => {
+        alive.current.card = true;
+        if (closeTimer.current) clearTimeout(closeTimer.current);
+      }}
+      onMouseLeave={() => {
+        alive.current.card = false;
+        scheduleClose();
+      }}
     >
-      <p className="truncate text-sm font-medium">{popup.title}</p>
-      {popup.locked ? (
-        <p className="text-fd-muted-foreground mt-1 flex items-center gap-1 text-xs">
-          <LockIcon className="size-3 shrink-0" />
-          这篇上了锁，要输口令
-        </p>
-      ) : (
-        popup.excerpt && (
-          <p className="text-fd-muted-foreground mt-1 line-clamp-4 text-xs leading-relaxed">
-            {popup.excerpt}
+      <div className="flex items-start gap-2 border-b px-3 py-2">
+        <p className="min-w-0 flex-1 truncate text-sm font-medium">{popup.title}</p>
+        <Link
+          href={popup.url}
+          title="打开这一篇"
+          className="text-fd-muted-foreground hover:text-fd-primary shrink-0"
+          onClick={close}
+        >
+          <LinkIcon className="size-3.5" />
+        </Link>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2">
+        {popup.locked ? (
+          <p className="text-fd-muted-foreground flex items-center gap-1.5 py-3 text-xs">
+            <LockIcon className="size-3.5 shrink-0" />
+            这篇上了锁，要输口令才能看
           </p>
-        )
-      )}
+        ) : body === undefined ? (
+          <p className="text-fd-muted-foreground flex items-center gap-1.5 py-3 text-xs">
+            <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
+            读取中
+          </p>
+        ) : body === null ? (
+          <p className="text-fd-muted-foreground py-3 text-xs">这一篇读不出来</p>
+        ) : (
+          <div className="prose prose-sm prose-no-margin text-xs [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_pre]:text-[11px]">
+            {body}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

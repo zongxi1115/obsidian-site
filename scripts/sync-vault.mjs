@@ -9,7 +9,8 @@
  *   content/docs/**      —— 加好 frontmatter、转换过链接的 markdown，文件名是拼音
  *   content/vault-map.json —— 页面路径 → 笔记仓库里的原始路径（给"编辑此页"用）
  *   content/graph.json     —— 双链图谱的节点/连线/反向链接
- *   content/previews.json  —— 每篇的摘要，鼠标浮到双链上弹的那个小窗用
+ *   content/previews.json  —— 每篇的标题/是否上锁，鼠标浮到双链上弹的那个小窗用
+ *   public/previews/**     —— 那个小窗里要渲染的正文（截断过），悬浮时才去取
  *   public/vault/**      —— 笔记里引用到的图片
  */
 import fs from 'node:fs';
@@ -32,6 +33,7 @@ const OUT_MAP = path.join(ROOT, 'content/vault-map.json');
 const OUT_GRAPH = path.join(ROOT, 'content/graph.json');
 const OUT_PREVIEWS = path.join(ROOT, 'content/previews.json');
 const OUT_ASSETS = path.join(ROOT, 'public/vault');
+const OUT_PREVIEW_DOCS = path.join(ROOT, 'public/previews');
 const CACHE = path.join(ROOT, '.vault-cache');
 
 // Vercel 上没填值的环境变量会以空字符串注入，所以空白一律当没设过处理
@@ -169,22 +171,16 @@ function encryptBody(text, password) {
   return Buffer.concat([salt, iv, data, cipher.getAuthTag()]).toString('base64');
 }
 
-/** 鼠标浮到双链上时弹的那个小窗，要一段干净的纯文本 */
-function makeExcerpt(body, limit = 160) {
-  const text = body
-    .replace(/```[\s\S]*?```/g, ' ') // 代码块
-    .replace(/\$\$[\s\S]*?\$\$/g, ' ') // 行间公式
-    .replace(/%%[\s\S]*?%%/g, '')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // 图片
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/^\s*>\s?/gm, '')
-    .replace(/^\[![\w-]+\][+-]?\s*/gm, '')
-    .replace(/^\s*#{1,6}\s*/gm, '')
-    .replace(/^\s*[-*+]\s+/gm, '')
-    .replace(/[`*_~=|$]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+/**
+ * 悬浮小窗里要渲染的正文。整篇太长了没必要，截一段就行 ——
+ * 在段落边界切，免得把代码块或者 callout 拦腰砍断。
+ */
+function makePreviewBody(body, limit = 2400) {
+  const text = body.trim();
+  if (text.length <= limit) return text;
+  const cut = text.slice(0, limit);
+  const boundary = cut.lastIndexOf('\n\n');
+  return `${(boundary > limit / 3 ? cut.slice(0, boundary) : cut).trimEnd()}\n\n……`;
 }
 
 /** 用正文第一段做简介 */
@@ -316,6 +312,7 @@ function rewriteLinks(body, notePath, outgoing) {
 
 fs.rmSync(OUT_DOCS, { recursive: true, force: true });
 fs.rmSync(OUT_ASSETS, { recursive: true, force: true });
+fs.rmSync(OUT_PREVIEW_DOCS, { recursive: true, force: true });
 fs.mkdirSync(OUT_DOCS, { recursive: true });
 
 const written = [];
@@ -367,7 +364,7 @@ for (const notePath of notes) {
     title,
     hidden,
     locked: Boolean(password),
-    excerpt: password ? '' : makeExcerpt(rewritten),
+    previewBody: password ? '' : makePreviewBody(rewritten),
     outgoing: [...outgoing],
   });
 }
@@ -488,14 +485,16 @@ fs.writeFileSync(
 );
 
 const hiddenCount = written.length - listed.length;
-// 双链的悬浮预览：按站点 URL 索引，前端拿 href 直接查
+/* --------------------------------------------------- 双链的悬浮预览 */
+
+// 索引只放标题和有没有上锁，够小，可以直接打进前端包
 fs.writeFileSync(
   OUT_PREVIEWS,
   `${JSON.stringify(
     Object.fromEntries(
       written.map((item) => [
         `/docs/${item.slugPath}`,
-        { title: item.title, excerpt: item.excerpt, locked: item.locked },
+        { title: item.title, locked: item.locked },
       ]),
     ),
     null,
@@ -503,6 +502,14 @@ fs.writeFileSync(
   )}
 `,
 );
+
+// 正文单独放静态文件，鼠标真的浮上去了才去取，不占首屏
+for (const item of written) {
+  if (item.locked) continue; // 上了锁的当然不给预览
+  const dest = path.join(OUT_PREVIEW_DOCS, `${item.slugPath}.md`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, item.previewBody);
+}
 
 console.log(
   `[sync] 完成：${written.length} 篇笔记${hiddenCount ? `（其中 ${hiddenCount} 篇不列出来）` : ''}，` +

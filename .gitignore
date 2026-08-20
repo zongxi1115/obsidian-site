@@ -32,3 +32,4 @@ next-env.d.ts
 /content/vault-map.json
 /content/graph.json
 /content/previews.json
+/public/previews
